@@ -7,38 +7,22 @@
         <script src="script.js"></script>
     </head>
     <body>
-        <h1>Telnet bridge configuration</h1>
+        <h1>SerialBridge</h1>
         <fieldset>
-            <legend>Serial port</legend>
-            <p>Configure the speed of the serial port. After saving the speed is directly changed.</p>
-            <label for="serialSpeed">Speed</label>
-            <select id="serialSpeed">
-                <option>9600</option>
-                <option>19200</option>
-                <option>38400</option>
-                <option>57600</option>
-                <option>115200</option>
-            </select>
-            <input type="button" id="serialPort_save" value="Save" />
-        </fieldset>
-        <fieldset>
-            <legend>Access point</legend>
+            <legend>Configuration accesspoint "SerialBridge_&lt;id&gt;"</legend>
 			<p>IP: <span id="apIP"></span></p>
-            <p>Configure the SSID and password of the AccessPoint of the bridge. After saving the AccessPoint is directly changed.</p>
-            <label for="apSsid">SSID</label>
-            <input id="apSsid" type="text" maxlength="50" />
-            <label for="apPassword">Password</label>
-            <input id="apPassword" type="text" maxlength="50" />
-            <input type="button" id="ap_save" value="Save" />
+			<p>You can connect to this accesspoint to configure the module when it is not connected to a network. The AP password is also the OTA password and used for the debuggig terminal.</p>
+			<label for="apPassword">Password</label>
+            <input class="long" id="apPassword" type="password" maxlength="50" /><br/>
         </fieldset>
         <fieldset>
-            <legend>Networks</legend>
+            <legend>WiFi Networks</legend>
 			<p>IP: <span id="networkIP"></span></p>
-            <p>Configure the SSID and password of the networks that the bridge connects to. There is a timeout of 20 seconds per network, then the next network is used. Networks with an empty SSID are not used. The network list is used only at startup of the bridge.</p>
+			<p>RSSI: <span id="networkRSSI"></span></p>
+            <p>Configure the SSID and password of the networks that the module connects to. There is a timeout per network, after that the next network is used.</p>
             <table id="networks_placeholder">
                 <thead>
                     <tr>
-                        <th>Order</th>
                         <th>SSID</th>
                         <th>Password</th>
                         <th></th>
@@ -46,6 +30,15 @@
                 </thead>
                 <tbody></tbody>
             </table>
+			<input type="button" id="add" value="Add" />
         </fieldset>
+		<fieldset>
+			<legend>Serial port</legend>
+			<label for="serialSpeed">Baud</label>
+            <input class="long" id="serialSpeed" type="number" maxlength="50" /><br/>
+		</fieldset>
+		<div class="buttons">
+			<input type="button" id="save" value="Save" />
+		</div>
     </body>
 </html>

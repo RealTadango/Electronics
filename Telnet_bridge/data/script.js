@@ -2,36 +2,6 @@ showErrorFromResult = function () {
     alert('Error while updating setting');
 }
 
-SetSerialSpeed = function () {
-    $.ajax('setserialspeed', {
-        type: 'POST',
-        data: { speed: $('#serialSpeed').val() },
-        error: showErrorFromResult
-    });
-}
-
-SetAP = function () {
-    $.ajax('setap', {
-        type: 'POST',
-        data: { ssid: $('#apSsid').val(), password: $('#apPassword').val() },
-        error: showErrorFromResult
-    });
-}
-
-SetNetwork = function () {
-    var row = $(this).closest('tr');
-    var ssid = $(row.find('td input')[0]).val();
-    var password = $(row.find('td input')[1]).val();
-
-    var index = row.attr('data-index');
-
-    $.ajax('setnetwork', {
-        type: 'POST',
-        data: { index: index, ssid: ssid, password: password },
-        error: showErrorFromResult
-    });
-}
-
 LoadStatus = function() {
 	$.ajax('getstatus', {
         type: 'GET',
@@ -39,20 +9,16 @@ LoadStatus = function() {
         {
             SetStatus(result);
         },
-        error: function () {
-            alert('Error loading status, using dummy');
-
-            SetStatus({
-                apIP : '1.2.3.4',
-                networkIP : '1.2.3.4'
-            });
-        }
+        error: showErrorFromResult
     });
+	
+	setTimeout(LoadStatus, 2000);
 }
 
 SetStatus = function(status) {
 	$('#apIP').text(status.apIP);
 	$('#networkIP').text(status.networkIP);
+	$('#networkRSSI').text(status.rssi);
 }
 
 LoadConfig = function () {
@@ -62,49 +28,76 @@ LoadConfig = function () {
         {
             SetConfig(result);
         },
-        error: function () {
-            alert('Error loading configuration, using dummy');
-
-            SetConfig({
-                serialSpeed: 57600,
-                apSsid: 'TelnetBridge',
-                apPassword: 'TelnetBridge',
-                networks: [
-                    { ssid: 'dummy', password: 'dummy' },
-                    { ssid: '', password: '' },
-                    { ssid: '', password: '' },
-                    { ssid: '', password: '' },
-                    { ssid: '', password: '' }]
-            });
-        }
+        error: showErrorFromResult
     });
 }
 
 SetConfig = function (config) {
-    $('#serialSpeed').val(config.serialSpeed);
-    $('#apSsid').val(config.apSsid);
-    $('#apPassword').val(config.apPassword);
+	$('#serialSpeed').val(config.serialSpeed);
+	$('#apPassword').val(config.apPassword);
+	
+	if(!config.networks) {
+		AddNetwork();
+	} else {
+		for (var index in config.networks) {
+			var network = config.networks[index];
+			var row = '<tr>';
 
-    for (var index in config.networks) {
-        var network = config.networks[index];
+			row += '<td><input type="text" class="ssid" value="' + network.ssid + '" maxlength="50" /></td>';
+			row += '<td><input type="password" class="password" value="' + network.password + '" maxlength="50" /></td>';
+			row += '<td><input type="button" class="remove" value="Remove" /></td>';
 
-        var row = '<tr data-index="' + index + '">';
+			row += '</tr>';
+			$('#networks_placeholder tbody').append(row);
+		}
+	}
 
-        row += '<td>' + (parseInt(index) + 1) + '</td>';
-        row += '<td><input type="text" value="' + network.ssid + '" maxlength="50" /></td>';
-        row += '<td><input type="text" value="' + network.password + '" maxlength="50" /></td>';
-        row += '<td><input type="button" value="Save" /></td>';
+    $('#networks_placeholder tbody input.remove').click(function(){
+		$(this).closest('tr').remove()
+	});
+}
 
-        row += '</tr>';
-        $('#networks_placeholder tbody').append(row);
-    }
+Save = function () {
+	var data = {
+		serialSpeed: $('#serialSpeed').val(),
+		apPassword: $('#apPassword').val(),
+		networks: []
+	};
+	
+	$('#networks_placeholder tbody tr').each(function(){
+		var row = $(this);
+		var ssid = row.find('.ssid').val();
+		var password = row.find('.password').val();
+		
+		data.networks.push({ ssid: ssid, password: password});
+	});
 
-    $('#networks_placeholder tbody input:button').click(SetNetwork);
+    $.ajax('setconfig', {
+        type: 'POST',
+        data: JSON.stringify(data),
+        error: showErrorFromResult
+    });
+}
+
+AddNetwork = function() {
+	var row = '<tr>';
+
+	row += '<td><input type="text" class="ssid" maxlength="50" /></td>';
+	row += '<td><input type="password" class="password" maxlength="50" /></td>';
+	row += '<td><input type="button" class="remove" value="Remove" /></td>';
+
+	row += '</tr>';
+	row = $(row);
+	$('#networks_placeholder tbody').append(row);
+	
+	row.find('input.remove').click(function(){
+		$(this).closest('tr').remove()
+	});
 }
 
 $(function () {
     LoadConfig();
 	LoadStatus();
-    $('#serialPort_save').click(SetSerialSpeed);
-    $('#ap_save').click(SetAP);
+	$('#add').click(AddNetwork);
+	$('#save').click(Save);
 })

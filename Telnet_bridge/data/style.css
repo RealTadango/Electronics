@@ -16,9 +16,21 @@ fieldset {
     margin-right: auto;
 }
 
-input[type=text] {
+input[type=text],
+input[type=password] {
     border-radius: 3px 3px;
     border-style: groove;
     padding: 5px;
     width:150px;
 }
+
+input.long {
+    width:350px;
+}
+
+.buttons {
+	width: 500px;
+	margin-left: auto;
+    margin-right: auto;
+}
+	
