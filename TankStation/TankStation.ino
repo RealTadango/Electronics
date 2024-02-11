@@ -8,11 +8,10 @@
 #define PIN_BATT A1
 
 #define PRES_MIN 20
-#define PRES_SCNT 20  //was 50, testing....
+#define PRES_SCNT 20 //was 50, testing....
 #define PRES_DELAY 5000
 #define PRES_BUFCNT 30
-#define PRES_BUFTIME 50
-#define SOFT_DETECT 50
+#define PRES_BUFTIME 80 //50
 #define SOFT_DETECTTIMEOUT 10000
 
 #define MODE_IDLE 0
@@ -20,7 +19,7 @@
 #define MODE_CAL 2
 #define MODE_FILL 3
 #define MODE_REVERSE 4
-#define MODE_FULL 5
+#define MODE_DONE 5
 #define MODE_EMPTY 6
 #define MODE_ERROR 7
 #define MODE_LIMIT 8
@@ -33,7 +32,7 @@ char* modeText[] = { "Idle",
                       "Cali",
                       "Fill",
                       "Revr",
-                      "Full",
+                      "Done",
                       "Empt",
                       "Erro",
                       "Limi",
@@ -45,6 +44,7 @@ char* modeText[] = { "Idle",
 #define P_BUFFER_SIZE 20
 
 struct ConfigItem{
+  char* group;
   char* name; //display name
   int value; //default value
   int minvalue; //min value
@@ -62,30 +62,44 @@ char *typeOpts[] = { "Hard", "Soft" };
 char *autoStartOpts[] = { "No", "Yes" };
 
 ConfigItem config[] = {
-  {"Type", 1, 0, 1, "", 1, 1, typeOpts},
-  {"Limit", 0, 0, 9999, "ml", 1, 50, nullptr},
-  {"StartPwr", 50, 0, 100, "%", 1, 1, nullptr},
-  {"Power", 100, 0, 100, "%", 1, 1, nullptr},
-  {"AutoStart", 0, 0, 1, "", 1, 1, autoStartOpts},
-  {"Trigger", 3, 1, 20, "^", 1, 1, nullptr},
-  {"TrigDelay", 0, 0, 500, "ml", 1, 10, nullptr},
-  {"Reverse", 15, 0, 100, "sec", 10, 1, nullptr},
-  {"Flow", 476, 1, 2000, "p", 100, 1, nullptr},
-  {"FlowRev", 241, 1, 2000, "p", 100, 1, nullptr},
-  {"BattLow", 105, 0, 200, "V", 10, 1, nullptr},
+  {"", "Type", 1, 0, 1, "", 1, 1, typeOpts},
+  {"Soft tank", "Limit", 0, 0, 9999, "ml", 1, 50, nullptr},
+  {"Soft tank", "StartPwr", 50, 0, 100, "%", 1, 1, nullptr},
+  {"Soft tank", "Power", 100, 30, 100, "%", 1, 1, nullptr},
+  {"Soft tank", "Detect", 50, 0, 500, "ml", 1, 1, nullptr},
+  {"Soft tank", "Trigger", 2, 1, 20, "^", 1, 1, nullptr},
+  {"Soft tank", "TrigDelay", 0, 0, 500, "ml", 1, 10, nullptr},
+  {"Soft tank", "Reverse", 5, 0, 100, "sec", 10, 1, nullptr},
+  {"Hard tank", "Limit", 0, 0, 9999, "ml", 1, 50, nullptr},
+  {"Hard tank", "StartPwr", 50, 0, 100, "%", 1, 1, nullptr},
+  {"Hard tank", "Power", 100, 30, 100, "%", 1, 1, nullptr},
+  {"Hard tank", "Trigger", 4, 1, 20, "^", 1, 1, nullptr},
+  {"Hard tank", "TrigDelay", 150, 0, 500, "ml", 1, 10, nullptr},
+  {"Hard tank", "Reverse", 20, 0, 100, "sec", 10, 1, nullptr},
+  {"Common", "AutoStart", 0, 0, 1, "", 1, 1, autoStartOpts},
+  {"Common", "BattLow", 105, 0, 200, "V", 10, 1, nullptr},
+  {"Common", "Flow", 476, 1, 2000, "p", 100, 1, nullptr},
+  {"Common", "FlowRev", 241, 1, 2000, "p", 100, 1, nullptr},
 };
 
 #define CFG_TYPE 0
-#define CFG_LIMIT 1
-#define CFG_STARTPWR 2
-#define CFG_PWR 3
-#define CFG_AUTOSTART 4
-#define CFG_TRIGGER 5
-#define CFG_TRIGGERDELAY 6
-#define CFG_REVERSE 7
-#define CFG_FLOW 8
-#define CFG_FLOWREVERSE 9
-#define CFG_BATTLOW 10
+#define CFG_SOFT_LIMIT 1
+#define CFG_SOFT_STARTPWR 2
+#define CFG_SOFT_PWR 3
+#define CFG_SOFT_DETECT 4
+#define CFG_SOFT_TRIGGER 5
+#define CFG_SOFT_TRIGGERDELAY 6
+#define CFG_SOFT_REVERSE 7
+#define CFG_HARD_LIMIT 8
+#define CFG_HARD_STARTPWR 9
+#define CFG_HARD_PWR 10
+#define CFG_HARD_TRIGGER 11
+#define CFG_HARD_TRIGGERDELAY 12
+#define CFG_HARD_REVERSE 13
+#define CFG_AUTOSTART 14
+#define CFG_BATTLOW 15
+#define CFG_FLOW 16
+#define CFG_FLOWREVERSE 17
 
 #define MOTOR_OFF 0
 #define MOTOR_FILL 1
@@ -102,6 +116,7 @@ long tank_start = 0;
 int count = 0;
 int count_raw = 0;
 
+byte motorSetPower = 0;
 byte motorPower = 0;
 byte motorDirection = MOTOR_OFF;
 
@@ -114,7 +129,9 @@ long btn_last = 0;
 long btn_lastupdate = 0;
 int btn_delay = 0;
 long lastDraw = 0;
-
+long lastFlowCount = 0;
+long lastFlowTime = 0;
+int flow;
 
 LiquidCrystal lcd(13, 8, 12, 9, 11, 10);
 
@@ -139,102 +156,151 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_FLOWSENSOR), flowTick, FALLING);
 
   if(config[CFG_AUTOSTART].value == 1) {
-    motorPower = config[CFG_STARTPWR].value;
     mode = MODE_WAIT;
+    setMotorStartPower();
+  }
+}
+
+void setMotorStartPower() {
+  switch(config[CFG_TYPE].value) {
+    case TYPE_HARD: {
+    motorSetPower = config[CFG_HARD_PWR].value;
+    motorPower = config[CFG_HARD_STARTPWR].value;
+      break;
+    }
+    case TYPE_SOFT: {
+    motorSetPower = config[CFG_SOFT_PWR].value;
+    motorPower = config[CFG_SOFT_STARTPWR].value;
+      break;
+    }
+  }
+}
+
+
+void checkMode_Hard(int delta) {
+  if (mode == MODE_WAIT) {
+    motorDirection = MOTOR_FILL;
+    mode = MODE_CAL;
+  } else if (mode == MODE_CAL) {
+    if (tank_start == 0) {
+      tank_start = millis();
+    } else if (millis() > (tank_start + PRES_DELAY)) {
+      mode = MODE_FILL;
+    }
+  } else if (mode == MODE_FILL) {
+    if (delta < -2 - config[CFG_HARD_TRIGGER].value) {
+        motorDirection = MOTOR_OFF;
+        mode = MODE_ERROR;
+    } else if (count > config[CFG_HARD_TRIGGERDELAY].value && config[CFG_HARD_TRIGGER].value > 0 && delta > config[CFG_HARD_TRIGGER].value) {
+      if (config[CFG_HARD_REVERSE].value > 0) {
+        //Allow H-bridge to idle
+        motorDirection = MOTOR_OFF;
+        setMotor();
+        delay(100);
+        motorDirection = MOTOR_EMPTY;
+        setMotor();
+        mode = MODE_REVERSE;
+        tank_start = millis();
+      } else {
+        mode = MODE_DONE;
+        motorDirection = MOTOR_OFF;
+      }
+    } else if (config[CFG_HARD_LIMIT].value > 0 && count >= config[CFG_HARD_LIMIT].value) {
+      mode = MODE_LIMIT;
+      motorDirection = MOTOR_OFF;
+    }
+  } else if (mode == MODE_REVERSE) {
+    if (millis() > tank_start + (config[CFG_HARD_REVERSE].value * 100)) {
+      mode = MODE_DONE;
+      motorDirection = MOTOR_OFF;
+    }
+  }
+}
+
+void checkMode_Soft(int delta) {
+  if (mode == MODE_WAIT) {
+    motorDirection = MOTOR_EMPTY;
+    if (tank_start == 0) {
+      tank_start = millis();
+    } else if (millis() > (tank_start + SOFT_DETECTTIMEOUT)) {
+      mode = MODE_ERROR;
+      motorDirection = MOTOR_OFF;
+    } else if (config[CFG_SOFT_DETECT].value == 0) {
+      motorDirection = MOTOR_FILL;
+      mode = MODE_CAL;
+    } else if ((0 - count) > config[CFG_SOFT_DETECT].value) {
+      mode = MODE_CAL;
+      motorDirection = MOTOR_OFF;
+      setMotor();
+      delay(100);
+      motorPower = config[CFG_SOFT_STARTPWR].value;
+      motorDirection = MOTOR_FILL;
+      setMotor();
+      tank_start = 0;
+    }
+  } else if (mode == MODE_CAL) {
+    if (tank_start == 0) {
+      tank_start = millis();
+    } else if (millis() > (tank_start + PRES_DELAY)) {
+      mode = MODE_FILL;
+    }
+  } else if (mode == MODE_FILL) {
+    if (delta < -2 - config[CFG_SOFT_TRIGGER].value) {
+        motorDirection = MOTOR_OFF;
+        mode = MODE_ERROR;
+    } else if (count > config[CFG_SOFT_TRIGGERDELAY].value && config[CFG_SOFT_TRIGGER].value > 0 && delta > config[CFG_SOFT_TRIGGER].value) {
+      if (config[CFG_SOFT_REVERSE].value > 0) {
+        //Allow H-bridge to idle
+        motorDirection = MOTOR_OFF;
+        setMotor();
+        delay(100);
+        motorDirection = MOTOR_EMPTY;
+        setMotor();
+        mode = MODE_REVERSE;
+        tank_start = millis();
+      } else {
+        mode = MODE_DONE;
+        motorDirection = MOTOR_OFF;
+      }
+    } else if (config[CFG_SOFT_LIMIT].value > 0 && count >= config[CFG_SOFT_LIMIT].value) {
+      mode = MODE_LIMIT;
+      motorDirection = MOTOR_OFF;
+    }
+  } else if (mode == MODE_REVERSE) {
+    if (millis() > tank_start + (config[CFG_SOFT_REVERSE].value * 100)) {
+      mode = MODE_DONE;
+      motorDirection = MOTOR_OFF;
+    }
   }
 }
 
 void checkMode(double batt, int delta) {
   if (mode == MODE_IDLE) {
     tank_start = 0;
+    lastFlowCount = 0;
+    lastFlowTime = 0;
     motorDirection = MOTOR_OFF;
-  } else if (mode == MODE_EMPTY) {
-    motorDirection = MOTOR_EMPTY;    
-  } else if (mode != MODE_IDLE && batt < ((double)config[CFG_BATTLOW].value / 10)) {
+  } else if (batt < ((double)config[CFG_BATTLOW].value / 10)) {
     mode = MODE_BATTLOW;
     motorDirection = MOTOR_OFF;
+  } else if (mode == MODE_EMPTY) {
+    motorDirection = MOTOR_EMPTY;
+    if (tank_start == 0) tank_start = millis();
+    else if (millis() - tank_start > PRES_DELAY && flow >= -1) {
+      mode = MODE_DONE;
+      motorDirection = MOTOR_OFF;
+    } 
   } else {
     switch(config[CFG_TYPE].value)
     {
       case TYPE_HARD:
       {
-        if (mode == MODE_WAIT) {
-          motorDirection = MOTOR_FILL;
-          mode = MODE_CAL;
-        } else if (mode == MODE_CAL) {
-          if (tank_start == 0) {
-            tank_start = millis();
-          } else if (millis() > (tank_start + PRES_DELAY)) {
-            mode = MODE_FILL;
-          }
-        } else if (mode == MODE_FILL) {
-          if (count > config[CFG_TRIGGERDELAY].value && config[CFG_TRIGGER].value > 0 && delta > config[CFG_TRIGGER].value) {
-            if (config[CFG_REVERSE].value > 0) {
-              //Allow H-bridge to idle
-              motorDirection = MOTOR_OFF;
-              setMotor();
-              delay(100);
-              motorDirection = MOTOR_EMPTY;
-              setMotor();
-              mode = MODE_REVERSE;
-              tank_start = millis();
-            } else {
-              mode = MODE_FULL;
-              motorDirection = MOTOR_OFF;
-            }
-          } else if (config[CFG_LIMIT].value > 0 && count >= config[CFG_LIMIT].value) {
-            mode = MODE_LIMIT;
-            motorDirection = MOTOR_OFF;
-          }
-        } else if (mode == MODE_REVERSE) {
-          if (millis() > tank_start + (config[CFG_REVERSE].value * 100)) {
-            mode = MODE_FULL;
-            motorDirection = MOTOR_OFF;
-          }
-        }
-
+        checkMode_Hard(delta);
         break;
       }
       case TYPE_SOFT:
       {
-        if (mode == MODE_WAIT) {
-          motorDirection = MOTOR_EMPTY;
-          if (tank_start == 0) {
-            tank_start = millis();
-          } else if (millis() > (tank_start + SOFT_DETECTTIMEOUT)) {
-            mode = MODE_ERROR;
-            motorDirection = MOTOR_OFF;
-          } else if ((0 - count) > SOFT_DETECT) {
-            mode = MODE_CAL;
-            motorDirection = MOTOR_OFF;
-            setMotor();
-            delay(100);
-            motorPower = config[CFG_STARTPWR].value;
-            motorDirection = MOTOR_FILL;
-            setMotor();
-            tank_start = 0;
-          }
-        } else if (mode == MODE_CAL) {
-          if (tank_start == 0) {
-            tank_start = millis();
-          } else if (millis() > (tank_start + PRES_DELAY)) {
-            mode = MODE_FILL;
-          }
-        } else if (mode == MODE_FILL) {
-          if (count > config[CFG_TRIGGERDELAY].value && config[CFG_TRIGGER].value > 0 && delta > config[CFG_TRIGGER].value) {
-            mode = MODE_FULL;
-            motorDirection = MOTOR_OFF;
-          } else if (config[CFG_LIMIT].value > 0 && count >= config[CFG_LIMIT].value) {
-            mode = MODE_LIMIT;
-            motorDirection = MOTOR_OFF;
-          }
-        } else if (mode == MODE_REVERSE) {
-          if (millis() > tank_start + (config[CFG_REVERSE].value * 100)) {
-            mode = MODE_FULL;
-            motorDirection = MOTOR_OFF;
-          }
-        }
-
+        checkMode_Soft(delta);
         break;
       }
     }
@@ -262,17 +328,24 @@ void loop() {
   else {
     count = (double)count_raw / (config[CFG_FLOW].value / (double)100);
   }
+
+  if (millis() > (lastFlowTime + 1000)) {
+    lastFlowTime = millis();
+    flow = count - lastFlowCount;
+    lastFlowCount = count;
+  }
   
   int prevMode = mode;
-  int prevPwr = config[CFG_PWR].value;
   checkMode(batt, delta);
   readBtn();
 
   lastDraw = millis();
   drawLcd(pressure, batt, delta);
 
-  if (motorPower < config[CFG_PWR].value) {
+  if (motorPower < motorSetPower) {
     motorPower++;
+  } else if (motorPower > motorSetPower) {
+    motorPower--;
   }
 
   setMotor();
@@ -282,7 +355,7 @@ bool doBtn(bool repeat) {
   long diff = millis() - btn_last;
   btn_last = millis();
 
-  if (diff > 100) {
+  if (diff > 150) {
     btn_delay = 300;
     btn_lastupdate = millis();
     return true;
@@ -315,17 +388,11 @@ bool doBtn(bool repeat) {
 void btnUp() {
   if (doBtn(true)) {
     if (mode == MODE_EMPTY || mode == MODE_FILL) {
-      config[CFG_PWR].value++;
-
-      if (config[CFG_PWR].value > config[CFG_PWR].maxvalue) {
-        config[CFG_PWR].value = config[CFG_PWR].maxvalue;
-      }
-
-      motorPower = config[CFG_PWR].value;
-      saveData();
+      motorSetPower++;
+      if (motorSetPower > 100) motorSetPower = 100;
     } else if (menu_item == MENU_START && mode == MODE_IDLE) {
       count_raw = 0;
-      motorPower = config[CFG_STARTPWR].value;
+      setMotorStartPower();
       mode = MODE_WAIT;
     } else if(menu_item == MENU_CONFIG) {
       currentConfig.value += currentConfig.step;
@@ -342,17 +409,11 @@ void btnUp() {
 void btnDown() {
   if (doBtn(true)) {
     if (mode == MODE_EMPTY || mode == MODE_FILL) {
-      config[CFG_PWR].value--;
-
-      if (config[CFG_PWR].value < config[CFG_PWR].minvalue) {
-        config[CFG_PWR].value = config[CFG_PWR].minvalue;
-      }
-
-      motorPower = config[CFG_PWR].value;
-      saveData();
+      motorSetPower--;
+      if(motorSetPower < 30) motorSetPower = 30;
     } else if (menu_item == MENU_START && mode == MODE_IDLE) {
       count_raw = 0;
-      motorPower = config[CFG_STARTPWR].value;
+      setMotorStartPower();
       mode = MODE_EMPTY;
     } else if(menu_item == MENU_CONFIG) {
       currentConfig.value -= currentConfig.step;
@@ -371,7 +432,7 @@ void btnEnt() {
     if (mode == MODE_IDLE) {
       if (menu_item == MENU_START) {
         menu_item = MENU_CONFIG;
-        config_item = 0;
+        config_item = 1;
       } else if (menu_item == MENU_CONFIG) {
         int configMax = sizeof(config) / sizeof(ConfigItem);
         config_item++;
@@ -411,7 +472,7 @@ void readBtn() {
   pinMode(9, INPUT);
   pinMode(12, INPUT);
 
-  //delay(4);
+  delay(4);
 
   bool btn1 = !digitalRead(11);
   bool btn2 = !digitalRead(9);
@@ -464,67 +525,98 @@ String getDisplayValue(ConfigItem configItem) {
     }
 }
 
-void drawLcd(int pressure, double batt, int delta) {
-  if (menu_item == MENU_START) {
-    lcd.setCursor(0, 0);
+void drawLcd_Start(int pressure, double batt, int delta) {
+  lcd.setCursor(0, 0);
 
-    if(mode == MODE_IDLE) {
-      drawFixed(getDisplayValue(config[CFG_TYPE]), 5);      
-    } else {
-      drawFixed(modeText[mode], 5);
+  if(mode == MODE_IDLE) {
+    drawFixed(getDisplayValue(config[CFG_TYPE]), 5);      
+  } else {
+    drawFixed(modeText[mode], 5);
+  }
+
+  lcd.setCursor(5, 0);
+  drawFixed(String(count) + "ml", 7);
+
+  lcd.setCursor(12, 0);
+  if (motorDirection != MOTOR_OFF) {
+    drawFixed(String(motorPower) + "%", 4);
+  } else {
+    drawFixed("Off", 4);
+  }
+
+  lcd.setCursor(0, 1);
+
+  if (mode != MODE_IDLE && mode != MODE_BATTLOW) {
+
+    int limit = 0;
+    int trigger = 0;
+
+    switch(config[CFG_TYPE].value) {
+      case TYPE_HARD: {
+        limit = config[CFG_HARD_LIMIT].value;
+        trigger = config[CFG_HARD_TRIGGER].value;
+        break;
+      }
+      case TYPE_SOFT: {
+        limit = config[CFG_SOFT_LIMIT].value;
+        trigger = config[CFG_SOFT_TRIGGER].value;
+        break;
+      }
     }
 
-    lcd.setCursor(5, 0);
-    drawFixed(String(count) + "ml", 7);
+    if (limit > 0) {
+      int fill = abs(((double)count / (double)limit) * 16);
+      for (int i = 0; i < fill; i++) {
+        lcd.print("#");
+      }
+      for (int i = fill; i < 16; i++) {
+        lcd.print("_");
+      }
+    } else if (trigger > 0) {
+      int lowest = 0;
+      for (int i = 0; i < PRES_BUFCNT - 16; i++) {
+        lowest += pres_buffer[i];
+      }
 
-    lcd.setCursor(12, 0);
-    drawFixed(getDisplayValue(config[CFG_PWR]), 4);
+      lowest = lowest / (PRES_BUFCNT - 16);
 
-    lcd.setCursor(0, 1);
-    if (mode != MODE_IDLE && mode != MODE_BATTLOW) {
-      if (config[CFG_LIMIT].value > 0) {
-        int fill = abs(((double)count / (double)config[CFG_LIMIT].value) * 16);
-        for (int i = 0; i < fill; i++) {
-          lcd.print("#");
+      for (int i = PRES_BUFCNT - 16; i < PRES_BUFCNT; i++) {
+        int diff = pres_buffer[i] - lowest;
+        diff = 4 + ((double)diff / (double)trigger * 4);
+
+        if (diff > 8) diff = 8;
+        else if (diff < 0) diff = 0;
+
+        if (diff == 0) {
+          lcd.print(" ");
+        } else {
+          lcd.write(diff - 1);
         }
-        for (int i = fill; i < 16; i++) {
-          lcd.print("_");
-        }
-      } else if (config[CFG_TRIGGER].value > 0) {
-        int lowest = 0;
-        for (int i = 0; i < PRES_BUFCNT - 16; i++) {
-          lowest += pres_buffer[i];
-        }
-
-        lowest = lowest / (PRES_BUFCNT - 16);
-
-        for (int i = PRES_BUFCNT - 16; i < PRES_BUFCNT; i++) {
-          int diff = pres_buffer[i] - lowest;
-          diff = 4 + ((double)diff / (double)config[CFG_TRIGGER].value * 4);
-
-          if (diff > 8) diff = 8;
-          else if (diff < 0) diff = 0;
-
-          if (diff == 0) {
-            lcd.print(" ");
-          } else {
-            lcd.write(diff - 1);
-          }
-        }
-      } else {
-        drawFixed("Battery " + String(batt) + "V", 16);
       }
     } else {
       drawFixed("Battery " + String(batt) + "V", 16);
     }
+  } else {
+    drawFixed("Battery " + String(batt) + "V", 16);
+  }
+}
+
+void drawLcd_Config() {
+  lcd.setCursor(0, 0);
+  drawFixed("Menu " + String(currentConfig.group), 16);
+
+  lcd.setCursor(0, 1);
+  String displayValue = getDisplayValue(currentConfig);
+  drawFixed(String(currentConfig.name) + "=" + displayValue, 16);
+}
+
+void drawLcd(int pressure, double batt, int delta) {
+  if (menu_item == MENU_START) {
+    drawLcd_Start(pressure, batt, delta);
+
   } else if(menu_item == MENU_CONFIG)
   {
-    lcd.setCursor(0, 0);
-    String displayValue = getDisplayValue(currentConfig);
-    drawFixed(String(currentConfig.name) + "=" + displayValue, 16);
-
-    lcd.setCursor(0, 1);
-    drawFixed("Battery " + String(batt) + "V", 16);
+    drawLcd_Config();
   }
 }
 
